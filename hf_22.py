@@ -1,15 +1,11 @@
 import numpy as np
 import collections
-from scipy.special import comb
-from scipy.special import factorial2
-#from scipy.special import factorial12
-from scipy.special import factorial
 import copy 
 from scipy.linalg import eigh
 import argparse
 from scipy import linalg
 from scipy import special
-import random
+from numba import jit
 
 #loading things, parsing arguments
 def parse_args():
@@ -44,7 +40,7 @@ def xyz_reader(file_name):
         if index != 0:
             atom = line.split()[0]
             print(atom)
-            coords = [float(line.split()[1])*1.8897261339213, float(line.split()[2])*1.8897261339213, float(line.split()[3])*1.8897261339213]
+            coords = [float(line.split()[1])*1.8897259886, float(line.split()[2])*1.8897259886, float(line.split()[3])*1.8897259886]
             print(coords)
             atom_type.append(atom)
             #atomtype.append(atom)
@@ -53,7 +49,7 @@ def xyz_reader(file_name):
 
             if atom in aodict:
                 for ao in aodict[atom]:
-                    print("basis", ao)
+                    #print("basis", ao)
                     aonew = copy.copy(ao)
                     aonew.center = [coords[0],coords[1],coords[2]]
                     aolist.append(aonew)
@@ -243,53 +239,120 @@ class Mo(object): #molecular orbital->linear combination of atomic orbitals
 ###############################################################################
 # l, m and n are angular momenta in three respective dimensions here...lack of letters thing. its not a n quantum number
 
+@jit(nopython=True) 
+def factorial2_custom(n):
+    if n == 0:
+        return 1
+    if n < 0:
+        return 0
+    res = n
+    for i in range(n):
+         if res*(n-2*i) <= 0:
+            pass
+         else:
+            res = res*(n-2*i)
+    return res
 
+@jit(nopython=True) 
+def factorial_custom(n):
+    if n == 0:
+        return 1
+    if n < 0:
+        return 0
+    res = n
+    for i in range(1, n):
+         if res*(n-i) <= 0:
+            pass
+         else:
+            res = res*(n-i)
+    return res
 
+@jit(nopython=True) 
 def angular_bullswitch(l):
     if l == 0 or l < 0:
         return 1
     else:
-        return( (factorial2(2*l-1, exact=True, extend='zero'))**(0.5)   )
+        return( (factorial2_custom(2*l-1))**(0.5)   )
     
-def Normalization(angular1, angular2, exponent1, exponent2):
-    return (((2 * exponent1/np.pi)**0.75 )* ((2 * exponent2/np.pi)**0.75)) * ( ((4*exponent1)**(angular1/2)) / (angular_bullswitch(angular1)) ) * (((4*exponent2)**(angular2/2) )/ (angular_bullswitch(angular2)) )
-    #N =1 ###without normalization
+@jit(nopython=True) 
+def angular_bullswitch2(l, m, n):
+    if l <= 0 or m <= 0 or n <= 0:
+        return 1
+    else:
+        return( (factorial2_custom(2*l-1) * factorial2_custom(2*m-1) * factorial2_custom(2*n-1) )**(0.5)   )
 
+@jit(nopython=True)   
+def Normalization2(angularx, angulary, angularz, exponent1):
+
+    return (((2 * exponent1/np.pi)**0.75 )) * ( ((4*exponent1)**((angularx + angulary + angularz)/2)) / (angular_bullswitch2(angularx, angulary, angularz)) ) 
+    
+@jit(nopython=True)   
+def Normalization(angular1, angular2, exponent1, exponent2):
+
+    return (((2 * exponent1/np.pi)**0.75 )* ((2 * exponent2/np.pi)**0.75)) * ( ((4*exponent1)**(angular1/2)) / (angular_bullswitch(angular1)) ) * (((4*exponent2)**(angular2/2) )/ (angular_bullswitch(angular2)) )
+    
+
+@jit(nopython=True)
 def E(l1, l2, t, center1, center2, exponent1, exponent2):#calculate the gaussian-hermite expansion coefficient using recurence
     sumexponent = exponent1 + exponent2
     newcenter = (exponent1 * center1 + exponent2 * center2) / (sumexponent)
     diffcenter = center1 - center2
     redexponent = exponent1 * exponent2 / (sumexponent)
-    N = Normalization(l1, l2, exponent1, exponent2)
-    #N = 1
+
     if t > l1 + l2:
         return 0
     if l1 < 0 or l2 < 0 or t < 0:
         return 0
     elif l1 == 0 and l2 == 0 and t == 0:
-
-        return np.exp(-redexponent*diffcenter**2) *(N**(1/3))
+        return np.exp(-redexponent*diffcenter**2) 
     elif l1 > 0:
+
         return ( (1/(2*sumexponent))*E(l1-1, l2, t - 1,center1,center2,exponent1,exponent2)
                 +(newcenter - center1)*E(l1-1,l2,t,center1,center2,exponent1,exponent2)
                 +(t + 1)*E(l1-1,l2, t+1, center1,center2,exponent1,exponent2))
     elif l1 == 0:
+
         return ( (1/(2*sumexponent))*E(l1, l2-1, t - 1,center1,center2,exponent1,exponent2)
                 +(newcenter - center2)*E(l1,l2-1,t,center1,center2,exponent1,exponent2)
                 +(t + 1)*E(l1,l2-1, t+1, center1,center2,exponent1,exponent2))
     return 0
+"""@jit(nopython=True)
+def E(l1, l2, t, center1, center2, exponent1, exponent2):#calculate the gaussian-hermite expansion coefficient using recurence
+    sumexponent = exponent1 + exponent2
+    newcenter = (exponent1 * center1 + exponent2 * center2) / (sumexponent)
+    diffcenter = center1 - center2
+    redexponent = exponent1 * exponent2 / (sumexponent)
+    #t here does nothing
+    #if t > l1 + l2:
+    #    return 0
+    if l1 < 0 or l2 < 0 or t < 0:
+        return 0
+    elif l1 == 0 and l2 == 0 and t == 0:
+        #N = Normalization(l1, l2, exponent1, exponent2)
 
-def S(m1, m2, center1, center2, exponent1, exponent2): #calculate overlap type integral
+        return np.exp(-redexponent*diffcenter**2) #*(N**(1/3))
+    elif l1 > 0:
+        return ( (newcenter - center1)*E(l1-1,l2,t,center1,center2,exponent1,exponent2)
+            + ((l1-1)/(2*sumexponent))*E(l1-1, l2-1, t ,center1,center2,exponent1,exponent2)
+            + ((l2)/(2*sumexponent))*E(l1, l2-2, t ,center1,center2,exponent1,exponent2) )
     
-    return np.sqrt((np.pi/(exponent1 + exponent2)))*E(m1, m2, 0, center1, center2, exponent1, exponent2)
+                #( (1/(2*sumexponent))*E(l1-1, l2, t - 1,center1,center2,exponent1,exponent2)
+                #-(newcenter - center1)*E(l1-1,l2,t,center1,center2,exponent1,exponent2)
+                #+(t + 1)*E(l1-1,l2, t+1, center1,center2,exponent1,exponent2))
+    elif l1 == 0:
+        return  ( (newcenter - center2)*E(l1,l2-1,t,center1,center2,exponent1,exponent2)
+            + ((l2-1)/(2*sumexponent))*E(l1-1, l2-1, t ,center1,center2,exponent1,exponent2)
+            + ((l1)/(2*sumexponent))*E(l1, l2-2, t ,center1,center2,exponent1,exponent2))
 
-def T(m1, m2, center1, center2, exponent1, exponent2): #calculate kinetic type integral
-    result = 0
-    result += -2*exponent2*S(m1, m2 + 2, center1, center2, exponent1, exponent2)
-    result += exponent2*(2*m2+1)*S(m1, m2, center1, center2, exponent1, exponent2)
-    result += -1/2*m2*(m2-1)*S(m1, m2 - 2, center1, center2, exponent1, exponent2)
-    return result
-#
+    return 0"""
+
+
+@jit(nopython=True)
+def S(m1, m2, center1, center2, exponent1, exponent2): #calculate overlap type integral
+
+    return  np.sqrt((np.pi/(exponent1 + exponent2)))*E(m1, m2, 0, center1, center2, exponent1, exponent2)
+
+
 def boys(n, x):
     if x == 0:
         return 1/(2*n+1)
@@ -297,9 +360,10 @@ def boys(n, x):
         return 1/(2*n+1)
     else:
         return special.gammainc(n+0.5, x) * special.gamma(n+0.5) * (1/(2*x**(n+0.5)))
-#one of these two are depracated   
+
+@jit(nopython=True)   #deprocated
 def F(n, x): #calculate Boys function value by numerical integration
-    if x < 1e-3:
+    if x < 1e-7 or x**(2*n+1) == 0:
 
         return 1/(2*n + 1)
     if n == 50:   #
@@ -307,8 +371,8 @@ def F(n, x): #calculate Boys function value by numerical integration
         #if x < 1e-7:
         #    return res1
         for k in range(1,11):
-            res1 += (-x)**k/factorial(k)/(2*n+2*k+1)
-        res2 = factorial2(2*n-1)/2**(n+1)*np.sqrt(np.pi/x**(2*n+1))
+            res1 += (-x)**k/factorial_custom(k)/(2*n+2*k+1)
+        res2 = factorial2_custom(2*n-1)/2**(n+1)*np.sqrt(np.pi/x**(2*n+1))
         result = min(res1, res2)
         return result
     return (2*x*F(n+1,x)+np.exp(-x))/(2*n+1)
@@ -317,7 +381,7 @@ def R(t, u, v, n, p, x, y, z):
     if t < 0 or u < 0 or v < 0:
         return 0
     if t == 0 and u == 0 and v == 0:
-        return (-2*p)**n*boys(n,p*(x**2+y**2+z**2)) #HERE use boys or F...
+        return ((-2*p)**n)*boys(n,p*(x**2+y**2+z**2)) #HERE use boys or F...
     if t > 0:
         return (t-1)*R(t-2,u,v,n+1,p,x,y,z)+x*R(t-1,u,v,n+1,p,x,y,z)
     if u > 0:
@@ -327,7 +391,7 @@ def R(t, u, v, n, p, x, y, z):
     
 
 
-# l, m and n are angular momenta in three respective dimensions here...lack of letters thing. its not a n quantum number
+
 def overlap(ao1, ao2): #calculate overlap matrix <psi|phi>
     #print(ao1)
     l1, m1, n1 = ao1.angular
@@ -340,8 +404,9 @@ def overlap(ao1, ao2): #calculate overlap matrix <psi|phi>
         for j in range(len(ao2.coeffs)):
             exponent1 = ao1.exponents[i]
             exponent2 = ao2.exponents[j]
-            
-            result += (ao1.coeffs[i]*ao2.coeffs[j]*
+            N = Normalization2(l1, m1, n1, exponent1)
+            N2 = Normalization2(l2, m2, n2, exponent2)
+            result += (ao1.coeffs[i]*ao2.coeffs[j]*(N*N2)*
                     S(l1, l2, x1, x2, exponent1, exponent2)*
                     S(m1, m2, y1, y2, exponent1, exponent2)*
                     S(n1, n2, z1, z2, exponent1, exponent2))
@@ -357,21 +422,15 @@ def kinetic(ao1, ao2): #calculate kinetic integral <psi|-1/2*del^2|phi>
         for j in range(len(ao2.coeffs)):
             exponent1 = ao1.exponents[i]
             exponent2 = ao2.exponents[j]
+            
 
-            #correctionforhavingonly1dimension = np.pi/(exponent1+exponent2)
-
-            #N = Normalization(l1, l2, exponent1, exponent2)
-
-            result += 0.5*ao1.coeffs[i]* ao2.coeffs[j]*( (exponent2*(4*(l2 + m2 + n2)+6))*S(l1, l2, x1, x2, exponent1,exponent2 )*S(m1, m2, y1, y2, exponent1,exponent2 )*S(n1, n2, z1, z2, exponent1,exponent2 )
+            N = Normalization2(l1, m1, n1, exponent1)
+            N2 = Normalization2(l2, m2, n2, exponent2)
+            result +=  N*N2*0.5*ao1.coeffs[i]* ao2.coeffs[j]*( (exponent2*(4*(l2 + m2 + n2)+6))*S(l1, l2, x1, x2, exponent1,exponent2 )*S(m1, m2, y1, y2, exponent1,exponent2 )*S(n1, n2, z1, z2, exponent1,exponent2 )
             -4 * ((exponent2**2)* ( S(l1, l2+2, x1, x2, exponent1,exponent2 )*S(m1, m2, y1, y2, exponent1,exponent2 )* S(n1, n2, z1, z2, exponent1,exponent2 )+ S(m1, m2+2, y1, y2, exponent1,exponent2 )*S(l1, l2, x1, x2, exponent1,exponent2 )*S(n1, n2, z1, z2, exponent1,exponent2 ) +S(n1, n2+2, z1, z2, exponent1,exponent2 )*S(l1, l2, x1, x2, exponent1,exponent2 )*S(m1, m2, y1, y2, exponent1,exponent2 ) )) 
             -l2*(l2-1) * S(l1, l2-2, x1, x2, exponent1,exponent2)-m2*(m2-1) * S(m1, m2-2, y1, y2, exponent1,exponent2) -n2*(n2-1) * S(n1, n2-2, z1, z2, exponent1, exponent2)
             )
-            
-            """result += (ao1.coeffs[i]*ao2.coeffs[j]*
-                    (T(l1,l2,x1,x2,exponent1,exponent2)*S(m1,m2,y1,y2,exponent1,exponent2)*S(n1,n2,z1,z2,exponent1,exponent2) +
-                     S(l1,l2,x1,x2,exponent1,exponent2)*T(m1,m2,y1,y2,exponent1,exponent2)*S(n1,n2,z1,z2,exponent1,exponent2) +
-                     S(l1,l2,x1,x2,exponent1,exponent2)*S(m1,m2,y1,y2,exponent1,exponent2)*T(n1,n2,z1,z2,exponent1,exponent2))
-                   )"""
+
             #print("KINETIC", result)
     return result
 
@@ -397,11 +456,15 @@ def oneelectron(ao1, centerC, ao2):
             xpc = xp - xc
             ypc = yp - yc
             zpc = zp - zc
+            N = Normalization2(l1, m1, n1, exponent1)
+            N2 = Normalization2(l2, m2, n2, exponent2)
             for t in range(c+1):
                 for u in range(c+1):
                     for v in range(c+1):
                         result += (ao1.coeffs[i]*ao2.coeffs[j]*
-                                2*np.pi/p*E(l1,l2,t,x1,x2,exponent1,exponent2)*
+                                2*np.pi/p*
+                                N*N2 *
+                                E(l1,l2,t,x1,x2,exponent1,exponent2)*
                                 E(m1,m2,u,y1,y2,exponent1,exponent2)*
                                 E(n1,n2,v,z1,z2,exponent1,exponent2)*
                                 R(t,u,v,0,p,xpc,ypc,zpc))
@@ -441,6 +504,10 @@ def twoelectron(ao1, ao2, ao3, ao4):
                     xpq = xp - xq
                     ypq = yp - yq
                     zpq = zp - zq
+                    N = Normalization2(l1, m1, n1, exponent1)
+                    N2 = Normalization2(l2, m2, n2, exponent2)
+                    N3 = Normalization2(l3, m3, n3, exponent3)
+                    N4 = Normalization2(l4, m4, n4, exponent4)
                     for t in range(a + b + 1):
                         for u in range(a + b + 1):
                             for v in range(a + b + 1):
@@ -449,13 +516,15 @@ def twoelectron(ao1, ao2, ao3, ao4):
                                         for phi in range(c + d + 1):
                                             res += (ao1.coeffs[i]*ao2.coeffs[j]*ao3.coeffs[k]*ao4.coeffs[l]*
                                                     2*np.pi**(5/2)/p/q/np.sqrt(p+q)*
+                                                    N*N2*N3*N4*
                                                     E(l1, l2, t, x1, x2, exponent1, exponent2)*
                                                     E(m1, m2, u, y1, y2, exponent1, exponent2)*
                                                     E(n1, n2, v, z1, z2, exponent1, exponent2)*
                                                     E(l3, l4, tau, x3, x4, exponent3, exponent4)*
                                                     E(m3, m4, miu, y3, y4, exponent3, exponent4)*
                                                     E(n3, n4, phi, z3, z4, exponent3, exponent4)*
-                                                    (-1)**(tau + miu + phi)*
+                                                    
+                                                    (-1)**(tau + miu + phi )*
                                                     R(t+tau, u+miu, v+phi, 0, alpha, xpq, ypq, zpq)
                                                     )
     
@@ -491,13 +560,14 @@ print("total charge is", total_charge)
 
 
 n = len(aolist)
+print("aolist", aolist)
 
 Tmatrix = np.zeros((n,n))
 Smatrix = np.zeros((n,n))
 
 for i in range(n):
     for j in range(n):
-        #print("AAA, one, two", aolist[i].center, aolist[j].center)
+        print("orbitals involved, center, momentum, one, two", aolist[i].center, aolist[i].angular, aolist[j].center, aolist[j].angular)
         Smatrix[i][j] = overlap(aolist[i], aolist[j])
         Tmatrix[i][j] = kinetic(aolist[i], aolist[j])
 
@@ -543,14 +613,22 @@ def nuclear_nuclear_rep(atom_coordinates, atomlist):
                 Rab = (Rabx*Rabx + Raby*Raby + Rabz*Rabz)**(0.5)
                 V_nn += za*zb/Rab
     return V_nn
-
+import random
 def Cguesser(n):
     C = np.eye(n) #coeffcient matrix
     
     for basis in range(n):
+        total = 1
         for basis2 in range(n):
+            randoma = random.uniform(0, total)
+            C[basis][basis2] = randoma
+            total -= randoma
+            print(randoma)
             C[basis][basis2] = 1/n
+
     return C
+
+C = Cguesser(n)
 
 coulombRepulsionTensor = np.zeros((n,n,n,n))
 count = 0
@@ -568,7 +646,7 @@ for i in range(n):
                 elif coulombRepulsionTensor[i][j][i][j] != 0 and coulombRepulsionTensor[k][l][k][l] != 0 and (abs(coulombRepulsionTensor[i][j][i][j]))**(0.5) * (abs(coulombRepulsionTensor[k][l][k][l]))**(0.5) < 0.0000001:
                     coulombRepulsionTensor[i][j][k][l] = 0.000000001
                     print("simplifying due to schwarz inequalities")
-                    
+
                 else: #reusing 8 fold symmetry is much faster
                     if coulombRepulsionTensor[j][i][k][l] != 0: #not computed yet
                         coulombRepulsionTensor[i][j][k][l] = coulombRepulsionTensor[j][i][k][l]
@@ -596,7 +674,7 @@ for i in range(n):
                     
                 
                         coulombRepulsionTensor[i][j][k][l] = twoelectron(aolist[i],aolist[j],aolist[k],aolist[l])
-                        print("this integral is significant. Overlap1 ij, Overlap kl, [ij|kl]", Smatrix[i][j], Smatrix[k][l], coulombRepulsionTensor[i][j][k][l])
+                        print("this integral is new. Overlap1 ij, Overlap kl, [ij|kl]", Smatrix[i][j], Smatrix[k][l], coulombRepulsionTensor[i][j][k][l])
                 count += 1
                 update_progress(count / n**4)
                 #print(Smatrix[i][j], Smatrix[k][l], coulombRepulsionTensor[i][j][k][l])
@@ -610,14 +688,14 @@ print("coulombAttractionMatrix", coulombAttractionMatrix)
 V_nn = nuclear_nuclear_rep(atom_coords, atomlist)
 #print(V_nn)
 norb = int(total_charge/2)
-maxiter = 100
+maxiter = 50
 
 C = Cguesser(n)
 #C = np.zeros((n, n))
 
 print("C", C)
 prev = float('inf')
-tol = 1e-7
+tol = 1e-5
 step = 0
 for i in range(maxiter):
     step += 1
@@ -634,16 +712,20 @@ for i in range(maxiter):
                                     (coulombRepulsionTensor[j][k][l][m]-
                                      0.5*coulombRepulsionTensor[j][m][l][k]
                                     ))
-                        
+    print("JK", JK)
+    print("S", Smatrix)
+    
+
     F = Tmatrix + coulombAttractionMatrix + JK #add kinetic integral and coulomb attraction integeral
+    print("Fockmatrix", F)
     S = Smatrix #overlap matrix
 
     S_inverse = linalg.inv(S)
     S_inverse_sqrt = linalg.sqrtm(S_inverse)
     F_unitS = np.dot(S_inverse_sqrt, np.dot(F, S_inverse_sqrt))
     
-    energy, C = eigh(F_unitS)
-    mos = np.dot(S_inverse_sqrt, C)
+    energy, Cnew = eigh(F_unitS)
+    mos = np.dot(S_inverse_sqrt, Cnew)
     #print("mos, energy", mos, energy)
     nbasis_functions = mos.shape[0]
     density_matrix = np.zeros((nbasis_functions, nbasis_functions))
@@ -651,19 +733,34 @@ for i in range(maxiter):
     for i in range(nbasis_functions):
         for j in range(nbasis_functions):
             for oo in range(norb):
-                C = mos[i, oo]
+                Cundagger = mos[i, oo]
                 Cdagger = mos[j, oo]
-                density_matrix[i, j] += occupation * C * Cdagger
-    C = density_matrix
-    #print("Updated density matrix", C)
+                density_matrix[i, j] += occupation * Cundagger * Cdagger
+    Cupdated = density_matrix
 
+    C = Cupdated
+    #print("Updated density matrix", Cupdated)
+    #C = np.array(C)
+    #print("Old density matrix", C)
     nbasis_functions = density_matrix.shape[0]
     H_core = Tmatrix + coulombAttractionMatrix
+    print("Hcore", H_core)
     electronic_energy = 0 
+    kinetic_energy = 0
+    ne_energy = 0 
+    jk_energy = 0
     for k in range(nbasis_functions):
         for l in range(nbasis_functions):
-            electronic_energy += C[k, l] * (H_core[k, l] + 0.5* JK[k, l])
+            electronic_energy += C[k, l] * (H_core[k, l] +  0.5*JK[k, l])
+            kinetic_energy += C[k, l] * Tmatrix[k, l]
+            ne_energy += C[k, l] * coulombAttractionMatrix[k, l]
+            jk_energy += C[k, l] * 0.5*JK[k, l]
+
+    oneelectronic = kinetic_energy + ne_energy
+
     print("Electronic energy", electronic_energy)
+    print("kinetic energy, oneelec, jk_en", kinetic_energy, oneelectronic, jk_energy)
+
 
     if abs(electronic_energy - prev) < tol:
         print('SCF Converged')
@@ -673,7 +770,8 @@ for i in range(maxiter):
     print('EHF:'+str(electronic_energy)+" "+'prev:'+str(prev)+' '+'delta:'+str(delta))
 print("Nuclear rep", V_nn)
 print("Total",electronic_energy + V_nn)
-print()
+if step >= maxiter:
+    print("We did NOT converge in time. ")
 
 
 
